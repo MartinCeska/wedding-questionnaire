@@ -1,0 +1,5 @@
+# Local dev data and secrets – never publish
+dev/.data/
+dev/.admin-password
+node_modules/
+.claude/

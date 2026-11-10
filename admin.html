@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Dotazníky</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="admin">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand" id="brand"></div>
+      <div class="topbar-actions">
+        <span class="admin-badge" id="adminBadge"></span>
+        <button type="button" class="link-btn" id="logoutBtn" hidden></button>
+        <div class="lang-switch" role="group" aria-label="Language / Jazyk">
+          <button type="button" data-set-lang="cs" lang="cs" aria-label="Čeština">CZ</button>
+          <button type="button" data-set-lang="en" lang="en" aria-label="English">EN</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main id="app" class="page page-wide"></main>
+
+  <script src="config.js"></script>
+  <script src="assets/content.js"></script>
+  <script src="assets/common.js"></script>
+  <script src="assets/admin.js"></script>
+</body>
+</html>
