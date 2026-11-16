@@ -8,7 +8,10 @@
  * Setup (details in README.md)
  *   1. Paste this file into Extensions → Apps Script of a new Google Sheet.
  *   2. Project Settings → Script properties → add ADMIN_PASSWORD (at least 6 characters).
- *   3. Run `setup` once from the editor and allow the requested permissions.
+ *      Optional: NOTIFY_EMAIL (e-mail when a couple sends the questionnaire; several addresses
+ *      separated by commas) and ADMIN_URL (link to admin.html, put into that e-mail).
+ *   3. Run `setup` once from the editor and allow the requested permissions
+ *      (`sendTestEmail` checks that notification e-mails arrive).
  *   4. Deploy → New deployment → Web app; Execute as: Me; Who has access: Anyone.
  *   5. Put the web app URL (ending with /exec) into config.js as apiUrl.
  *
@@ -30,6 +33,9 @@ var MAX_FAILED_LOGINS = 10; // then admin sign-in is blocked for 15 minutes
 var MIN_PASSWORD_LENGTH = 6;
 var ID_ALPHABET = 'abcdefghijkmnpqrstuvwxyz23456789';
 var ID_LENGTH = 12;
+var MAIL_SENDER_NAME = 'Wedding questionnaire';
+var NOTIFY_THROTTLE_SECONDS = 300; // at most one e-mail per wedding per 5 minutes, however often they press Send
+var EMAIL_PATTERN = /[^\s@,;<>"()\[\]]+@[^\s@,;<>"()\[\]]+\.[A-Za-z]{2,}/;
 
 var HANDLERS = {
   // Couple's page (the wedding id from the link is the only key)
@@ -76,14 +82,42 @@ function doPost(e) {
   }
 }
 
-/** Run once from the Apps Script editor: creates the sheet and the photo folder, checks the password. */
+/** Run once from the Apps Script editor: creates the sheet and the photo folder, checks the settings. */
 function setup() {
   sheet_();
   photoRoot_();
-  var pw = PropertiesService.getScriptProperties().getProperty('ADMIN_PASSWORD');
+  var props = PropertiesService.getScriptProperties();
+  var pw = props.getProperty('ADMIN_PASSWORD');
   Logger.log(pw && pw.length >= MIN_PASSWORD_LENGTH
     ? 'Setup done. Admin password is set.'
     : 'Setup done, but ADMIN_PASSWORD is missing or shorter than ' + MIN_PASSWORD_LENGTH + ' characters. Add it in Project Settings → Script properties.');
+  var to = notifyRecipients_();
+  Logger.log(to
+    ? 'When a couple sends the questionnaire, an e-mail goes to ' + to + '. Run sendTestEmail to check it arrives.'
+    : props.getProperty('NOTIFY_EMAIL')
+      ? 'NOTIFY_EMAIL is not a valid e-mail address (several are separated by commas) – no notification e-mails will be sent.'
+      : 'NOTIFY_EMAIL is not set – no notification e-mails will be sent.');
+}
+
+/** Run from the Apps Script editor: sends a sample notification to NOTIFY_EMAIL. */
+function sendTestEmail() {
+  var sample = {
+    id: 'test0000test',
+    couple: 'Anna & Tom (test)',
+    weddingDate: '2027-06-12',
+    venue: 'Sample venue',
+    contact: 'anna@example.com',
+    photos: '[]',
+  };
+  var mail = notificationEmail_(sample, false);
+  if (!mail) {
+    Logger.log('Add NOTIFY_EMAIL in Project Settings → Script properties first.');
+    return;
+  }
+  delete mail.replyTo;
+  mail.subject = '[Test] ' + mail.subject;
+  MailApp.sendEmail(mail);
+  Logger.log('Test e-mail sent to ' + mail.to + '.');
 }
 
 /* ------------------------------------------------------------------ */
@@ -110,21 +144,27 @@ function saveAnswers_(req) {
   var json = JSON.stringify(answers);
   if (json.length > MAX_ANSWERS_JSON_LENGTH) throw fail_('too_large');
   var submit = req.submit === true;
-  return withLock_(function () {
+  var sent = null;
+  var result = withLock_(function () {
     var found = findWedding_(req.id);
     var w = found.record;
     var t = now_();
+    var sentBefore = !!w.submittedAt;
     w.answers = json;
     w.updatedAt = t;
     if (submit) {
       w.status = 'submitted';
       w.submittedAt = t;
+      sent = { wedding: w, again: sentBefore };
     } else if (w.status !== 'submitted') {
       w.status = 'draft';
     }
     writeRow_(found.row, w);
     return { wedding: publicView_(w) };
   });
+  // Outside the lock: sending takes a moment, and a failed e-mail must never fail the save.
+  if (sent) notifySubmitted_(sent.wedding, sent.again);
+  return result;
 }
 
 function uploadPhoto_(req) {
@@ -437,6 +477,73 @@ function photoIndex_(photos, photoId) {
     if (photos[i].id === photoId) return i;
   }
   return -1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Notification e-mail                                                 */
+/* ------------------------------------------------------------------ */
+
+/** E-mails NOTIFY_EMAIL that a couple sent the questionnaire. Never throws. */
+function notifySubmitted_(w, again) {
+  try {
+    var cache = CacheService.getScriptCache();
+    var key = 'wq_notified_' + w.id;
+    if (cache.get(key)) return;
+    var mail = notificationEmail_(w, again);
+    if (!mail) return;
+    MailApp.sendEmail(mail);
+    cache.put(key, '1', NOTIFY_THROTTLE_SECONDS);
+  } catch (err) {
+    console.error('Notification e-mail failed: ' + (err && err.stack ? err.stack : err));
+  }
+}
+
+/** The MailApp.sendEmail options for a sent questionnaire, or null when NOTIFY_EMAIL is not set. */
+function notificationEmail_(w, again) {
+  var to = notifyRecipients_();
+  if (!to) return null;
+  var couple = oneLine_(w.couple) || 'A couple';
+  var date = formatDay_(w.weddingDate);
+  var lines = [
+    couple + (again ? ' sent their floral questionnaire again.' : ' sent their floral questionnaire.'),
+    '',
+    'Wedding date: ' + (date || '–'),
+    'Venue: ' + (oneLine_(w.venue) || '–'),
+    'Contact: ' + (oneLine_(w.contact) || '–'),
+    'Inspiration photos: ' + parseJson_(w.photos, []).length,
+  ];
+  var adminUrl = String(PropertiesService.getScriptProperties().getProperty('ADMIN_URL') || '').trim();
+  if (/^https?:\/\/\S+$/.test(adminUrl)) {
+    lines.push('', 'Read the answers: ' + adminUrl.replace(/#.*$/, '') + '#/w/' + w.id);
+  }
+  var mail = {
+    to: to,
+    subject: (again ? 'Questionnaire sent again: ' : 'Questionnaire sent: ') + couple + (date ? ' (' + date + ')' : ''),
+    body: lines.join('\n'),
+    name: MAIL_SENDER_NAME,
+  };
+  var reply = String(w.contact || '').match(EMAIL_PATTERN); // so "Reply" goes to the couple
+  if (reply) mail.replyTo = reply[0];
+  return mail;
+}
+
+/** NOTIFY_EMAIL as "a@x.cz,b@y.com", or '' when it is missing or not all e-mail addresses. */
+function notifyRecipients_() {
+  var raw = String(PropertiesService.getScriptProperties().getProperty('NOTIFY_EMAIL') || '');
+  var parts = raw.split(',').map(function (p) { return p.trim(); }).filter(String);
+  var exact = new RegExp('^' + EMAIL_PATTERN.source + '$');
+  if (!parts.length || !parts.every(function (p) { return exact.test(p); })) return '';
+  return parts.join(',');
+}
+
+/** '2027-06-12' → '12. 6. 2027' */
+function formatDay_(iso) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+  return m ? Number(m[3]) + '. ' + Number(m[2]) + '. ' + m[1] : '';
+}
+
+function oneLine_(s) {
+  return String(s || '').replace(/\s+/g, ' ').trim();
 }
 
 /* ------------------------------------------------------------------ */

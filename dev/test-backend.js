@@ -109,6 +109,86 @@ test('save draft, then submit', () => {
   err(be.call('saveAnswers', { id, answers: [] }), 'bad_answers');
 });
 
+test('no notification e-mail while NOTIFY_EMAIL is not set', () => {
+  assert.equal(be.services.mail().length, 0, 'the submit above must not have sent anything');
+});
+
+test('notification e-mail when a couple sends the questionnaire', () => {
+  be.setProperty('NOTIFY_EMAIL', ' florist@example.com , helper@example.cz ');
+  be.setProperty('ADMIN_URL', 'https://example.github.io/wq/admin.html');
+  const nid = ok(be.call('adminCreate', {
+    password: PW,
+    wedding: { couple: 'Eva &\nPetr', weddingDate: '2027-09-04', venue: 'Mlýn', contact: 'Eva Nová, eva.nova@example.com, 777 123 456' },
+  })).wedding.id;
+  const mail = () => be.services.mail();
+
+  ok(be.call('saveAnswers', { id: nid, answers: { bouquetShape: 'round' } }));
+  assert.equal(mail().length, 0, 'a draft save sends nothing');
+
+  ok(be.call('uploadPhoto', { id: nid, mimeType: 'image/png', data: PNG_1PX }));
+  ok(be.call('saveAnswers', { id: nid, answers: { bouquetShape: 'round' }, submit: true }));
+  assert.equal(mail().length, 1);
+  const m = mail()[0];
+  assert.equal(m.to, 'florist@example.com,helper@example.cz');
+  assert.equal(m.subject, 'Questionnaire sent: Eva & Petr (4. 9. 2027)');
+  assert.equal(m.replyTo, 'eva.nova@example.com');
+  assert.match(m.body, /^Eva & Petr sent their floral questionnaire\./);
+  assert.match(m.body, /Venue: Mlýn/);
+  assert.match(m.body, /Inspiration photos: 1/);
+  assert.match(m.body, new RegExp('Read the answers: https://example\\.github\\.io/wq/admin\\.html#/w/' + nid + '$'));
+
+  ok(be.call('saveAnswers', { id: nid, answers: { bouquetShape: 'meadow' }, submit: true }));
+  assert.equal(mail().length, 1, 'sending again within 5 minutes does not e-mail again');
+  be.services.clearCache();
+  ok(be.call('saveAnswers', { id: nid, answers: { bouquetShape: 'meadow' }, submit: true }));
+  assert.equal(mail().length, 2);
+  assert.match(mail()[1].subject, /^Questionnaire sent again: Eva & Petr/);
+  assert.match(mail()[1].body, /sent their floral questionnaire again\./);
+});
+
+test('a failing or misconfigured e-mail never fails the submit', () => {
+  const nid = ok(be.call('adminCreate', { password: PW, wedding: { couple: 'Jana & Karel', contact: '777 000 111' } })).wedding.id;
+  const before = be.services.mail().length;
+  be.services.setMailError('Service invoked too many times for one day: email.');
+  const origError = console.error;
+  let logged = '';
+  console.error = (msg) => { logged += msg; };
+  try {
+    assert.equal(ok(be.call('saveAnswers', { id: nid, answers: {}, submit: true })).wedding.status, 'submitted');
+  } finally {
+    console.error = origError;
+    be.services.setMailError(null);
+  }
+  assert.match(logged, /Notification e-mail failed/);
+  assert.equal(be.services.mail().length, before);
+
+  be.services.clearCache();
+  ok(be.call('saveAnswers', { id: nid, answers: {}, submit: true }));
+  const m = be.services.mail()[be.services.mail().length - 1];
+  assert.equal(m.subject, 'Questionnaire sent again: Jana & Karel', 'no date → no brackets');
+  assert.equal(m.replyTo, undefined, 'no e-mail in contact → no Reply-To');
+  assert.match(m.body, /Wedding date: –/);
+
+  be.setProperty('NOTIFY_EMAIL', 'not an address');
+  be.services.clearCache();
+  ok(be.call('saveAnswers', { id: nid, answers: {}, submit: true }));
+  assert.equal(be.services.mail().length, before + 1, 'invalid NOTIFY_EMAIL sends nothing');
+  be.setProperty('ADMIN_URL', 'javascript:alert(1)');
+  be.setProperty('NOTIFY_EMAIL', 'florist@example.com');
+  be.services.clearCache();
+  ok(be.call('saveAnswers', { id: nid, answers: {}, submit: true }));
+  assert.doesNotMatch(be.services.mail()[before + 1].body, /Read the answers/, 'a non-http ADMIN_URL is left out');
+});
+
+test('sendTestEmail sends a sample to NOTIFY_EMAIL', () => {
+  const before = be.services.mail().length;
+  be.runFunction('sendTestEmail');
+  const m = be.services.mail()[before];
+  assert.equal(m.to, 'florist@example.com');
+  assert.match(m.subject, /^\[Test\] Questionnaire sent: /);
+  assert.equal(m.replyTo, undefined);
+});
+
 let photoId;
 test('photos: upload, read back, validation, limit, delete', () => {
   err(be.call('uploadPhoto', { id, mimeType: 'text/html', data: PNG_1PX }), 'bad_photo_type');
@@ -141,7 +221,7 @@ test('admin update and delete', () => {
   ok(be.call('adminDelete', { password: PW, id }));
   err(be.call('getWedding', { id }), 'not_found');
   assert.equal(be.services.state().folders[folderId].trashed, true);
-  assert.equal(ok(be.call('adminList', { password: PW })).weddings.length, 4);
+  assert.equal(ok(be.call('adminList', { password: PW })).weddings.length, 6); // 5 + 2 from the e-mail tests − 1
 });
 
 test('admin endpoints reject missing password', () => {

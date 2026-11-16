@@ -42,13 +42,19 @@ Use the Google account that should own the data, e.g. the florist's.
 
 1. **Create a Google Sheet**, e.g. *Svatební dotazníky*.
 2. In the Sheet: **Extensions → Apps Script**. Delete the sample code, paste the whole content of `apps-script/Code.gs`, click **Save**.
-3. **Project Settings** (gear icon, left) → **Script properties** → **Add script property**:
-   - Property: `ADMIN_PASSWORD`
-   - Value: the admin password (at least 6 characters)
-   - **Save script properties**.
+3. **Project Settings** (gear icon, left) → **Script properties** → **Add script property** for each of these, then **Save script properties**:
+
+   | Property | Value |
+   |---|---|
+   | `ADMIN_PASSWORD` | the admin password (at least 6 characters) |
+   | `NOTIFY_EMAIL` | *optional* – where to send an e-mail when a couple sends the questionnaire, e.g. `you@example.com`. Several addresses: separate with commas. |
+   | `ADMIN_URL` | *optional* – the admin page address, e.g. `https://<user>.github.io/<repo>/admin.html`. The e-mail then links straight to that couple's answers. |
+
+   These live only in Apps Script, never in the public repository.
 4. Back in the **Editor**, choose the function **`setup`** in the toolbar and click **Run**. Google asks for permissions:
    **Review permissions** → pick the account → *"Google hasn't verified this app"* → **Advanced** → **Go to … (unsafe)** → **Allow**.
-   This warning is normal for your own script. The log should say *"Setup done. Admin password is set."* – a sheet **Weddings** and a Drive folder **Wedding questionnaire – photos** now exist.
+   This warning is normal for your own script. The log should say *"Setup done. Admin password is set."* and where notification e-mails go – a sheet **Weddings** and a Drive folder **Wedding questionnaire – photos** now exist.
+   To check the e-mail, run **`sendTestEmail`** the same way: a sample notification should arrive within a minute (look in spam the first time).
 5. **Deploy → New deployment** → gear next to *Select type* → **Web app**:
    - Execute as: **Me**
    - Who has access: **Anyone**
@@ -67,11 +73,13 @@ Use the Google account that should own the data, e.g. the florist's.
 ### Changing the backend later
 
 Saving `Code.gs` does **not** update the live web app. After editing it:
-**Deploy → Manage deployments → ✏️ (Edit) → Version: New version → Deploy.** The URL stays the same, so `config.js` doesn't change.
 
-### Changing the admin password
+1. **Save**, then **Run `setup`** once. If the new code needs a new permission (e.g. *"Send email as you"* for notifications), Google asks for it now – allow it. Skipping this step can make the live web app fail for everyone until the permission is granted.
+2. **Deploy → Manage deployments → ✏️ (Edit) → Version: New version → Deploy.** The URL stays the same, so `config.js` doesn't change.
 
-Edit `ADMIN_PASSWORD` in **Project Settings → Script properties**. It takes effect immediately; no redeploy is needed.
+### Changing the admin password or notification e-mail
+
+Edit `ADMIN_PASSWORD`, `NOTIFY_EMAIL` or `ADMIN_URL` in **Project Settings → Script properties**. It takes effect immediately; no redeploy is needed.
 
 ---
 
@@ -106,6 +114,15 @@ A custom domain (e.g. `dotaznik.example.cz`) can be added under **Settings → P
 4. **Answers** shows everything they filled in plus their photos (click a photo for full size). **Print** gives a clean printout. **Edit details** fixes names, date, etc.; **Delete** removes the wedding, its answers and photos (photos go to the Drive trash).
 
 Couples can come back to their link any time; answers are saved as they type (and kept in the browser if they go offline). After sending they can still change answers and send again.
+
+### E-mail when a couple sends the questionnaire
+
+With `NOTIFY_EMAIL` set, every **Send** (and every later **Send again**) e-mails you: couple, wedding date, venue, contact, number of photos and – with `ADMIN_URL` set – a link to their answers. **Reply** goes to the couple when their contact contains an e-mail address. The e-mail comes from the Google account that owns the script.
+
+- Several clicks on Send within 5 minutes give one e-mail.
+- If an e-mail can't be sent (e.g. Google's daily limit of about 100 e-mails for a free account), the couple's answers are still saved; the error is in Apps Script → **Executions**.
+- To stop the e-mails, delete `NOTIFY_EMAIL` in Script properties – no redeploy needed.
+- Locally (`node dev/server.js`) nothing is sent: the e-mail is printed in the server console.
 
 ## Where the data is
 

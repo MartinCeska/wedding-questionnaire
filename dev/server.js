@@ -4,7 +4,7 @@
  *   - serves the static site (like GitHub Pages)
  *   - answers /api by running the real apps-script/Code.gs against fake Google services
  *
- * Usage:  node dev/server.js        (env: PORT=4321, ADMIN_PASSWORD, LATENCY_MS=400)
+ * Usage:  node dev/server.js        (env: PORT=4321, ADMIN_PASSWORD, LATENCY_MS=400, NOTIFY_EMAIL)
  * The local admin password is read from dev/.admin-password (git-ignored) when ADMIN_PASSWORD is not set.
  * Data is kept in dev/.data/ – delete that folder to start fresh.
  */
@@ -22,8 +22,11 @@ const ADMIN_PASSWORD =
   process.env.ADMIN_PASSWORD || (fs.existsSync(PASSWORD_FILE) ? fs.readFileSync(PASSWORD_FILE, 'utf8').trim() : '') || 'florist-dev';
 const MAX_BODY = 8 * 1024 * 1024;
 
-const backend = loadBackend(path.join(__dirname, '.data'));
+const backend = loadBackend(path.join(__dirname, '.data'), { logMail: true });
 backend.setProperty('ADMIN_PASSWORD', ADMIN_PASSWORD);
+// Notification e-mails are not really sent locally – they are printed below the request log.
+backend.setProperty('NOTIFY_EMAIL', process.env.NOTIFY_EMAIL || 'florist@example.com');
+backend.setProperty('ADMIN_URL', `http://localhost:${PORT}/admin.html`);
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',

@@ -248,11 +248,27 @@ function createServices(dataDir, options = {}) {
 
   const Logger = { log: (...args) => console.log('[Logger]', ...args) };
 
+  // Nothing is really sent: e-mails are kept in state.mail (and printed by the dev server).
+  let mailError = null;
+  const MailApp = {
+    sendEmail: (mail) => {
+      if (mailError) throw new Error(mailError);
+      if (!mail || !mail.to || !mail.subject) throw new Error('Invalid argument: recipient/subject');
+      const sent = { to: mail.to, subject: mail.subject, body: mail.body || '', name: mail.name, replyTo: mail.replyTo, sentAt: new Date().toISOString() };
+      (state.mail = state.mail || []).push(sent);
+      if (options.logMail) console.log(`\n[MailApp] To: ${sent.to}${sent.replyTo ? '  Reply-To: ' + sent.replyTo : ''}\n[MailApp] Subject: ${sent.subject}\n${sent.body.replace(/^/gm, '  | ')}\n`);
+    },
+  };
+
   return {
-    globals: { SpreadsheetApp, DriveApp, Utilities, ContentService, LockService, CacheService, PropertiesService, Logger, console },
+    globals: { SpreadsheetApp, DriveApp, Utilities, ContentService, LockService, CacheService, PropertiesService, Logger, MailApp, console },
     state: () => state,
     save,
     clearCache: () => cache.clear(),
+    mail: () => state.mail || [],
+    setMailError: (message) => {
+      mailError = message || null;
+    },
   };
 }
 
